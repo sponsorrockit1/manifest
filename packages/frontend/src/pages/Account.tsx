@@ -11,6 +11,7 @@ import { Title, Meta } from '@solidjs/meta';
 import { authClient } from '../services/auth-client.js';
 import { getBillingStatus, updateBillingEmailPreferences } from '../services/api/billing.js';
 import { toast } from '../services/toast-store.js';
+import AdminKeysSection from '../components/AdminKeysSection.jsx';
 import {
   FREE_REQUEST_LIMIT_LABEL,
   formatBillingPriceWithInterval,
@@ -501,6 +502,10 @@ const Account: Component = () => {
             </div>
           </div>
         </Show>
+
+        {/* AI admin keys (v1.1) — visible only to users; the server-side
+            ai_admin key performs the /admin calls (plan §D.1) */}
+        <AdminKeysSection />
 
         {/* Appearance */}
         <h2 class="settings-section__title">Appearance</h2>

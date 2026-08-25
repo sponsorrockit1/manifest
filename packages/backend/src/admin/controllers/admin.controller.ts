@@ -12,6 +12,8 @@ import { IsOptional, IsString } from 'class-validator';
 import { TenantCtx, TenantContext } from '../../common/decorators/tenant-context.decorator';
 import { AdminAiGuard } from '../guards/admin-ai.guard';
 import { AdminBootstrap } from '../decorators/admin-bootstrap.decorator';
+import { AllowPausedKey } from '../decorators/allow-paused-key.decorator';
+import { ReqApiKey } from '../decorators/req-api-key.decorator';
 import { AdminKeyService } from '../services/admin-key.service';
 
 class CreateAdminKeyDto {
@@ -64,6 +66,49 @@ export class AdminController {
     if (!ctx.tenantId) return { revoked: false };
     await this.adminKeyService.revokeAdminKey(ctx.tenantId, id);
     return { revoked: true };
+  }
+
+  /**
+   * v1.1 rotate: in-place re-key; old raw key invalidated immediately (hash
+   * replaced). New raw key returned exactly once.
+   */
+  @Post('keys/:id/rotate')
+  async rotateKey(@TenantCtx() ctx: TenantContext, @Param('id') id: string) {
+    if (!ctx.tenantId) {
+      throw new ForbiddenException('Admin key rotation requires a resolved tenant.');
+    }
+    const { id: keyId, key, keyPrefix } = await this.adminKeyService.rotateAdminKey(
+      ctx.tenantId,
+      id,
+    );
+    return { id: keyId, key, keyPrefix };
+  }
+
+  /**
+   * v1.1 pause: operational soft-disable. Self-pause forbidden — a key must
+   * not be able to lock out its own management path.
+   */
+  @Post('keys/:id/pause')
+  async pauseKey(
+    @TenantCtx() ctx: TenantContext,
+    @Param('id') id: string,
+    @ReqApiKey() apiKeyId?: string,
+  ) {
+    if (!ctx.tenantId) return { paused: false };
+    await this.adminKeyService.pauseAdminKey(ctx.tenantId, id, apiKeyId);
+    return { paused: true };
+  }
+
+  /**
+   * v1.1 resume: clears paused_at. The ONLY route a paused key can reach
+   * (@AllowPausedKey exempts it from the guard's paused rejection).
+   */
+  @Post('keys/:id/resume')
+  @AllowPausedKey()
+  async resumeKey(@TenantCtx() ctx: TenantContext, @Param('id') id: string) {
+    if (!ctx.tenantId) return { resumed: false };
+    await this.adminKeyService.resumeAdminKey(ctx.tenantId, id);
+    return { resumed: true };
   }
 
   @Get('health')

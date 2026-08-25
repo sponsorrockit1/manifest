@@ -26,6 +26,7 @@ describe('TenantProvidersController', () => {
       label,
       priority: 0,
       api_key_encrypted: 'encrypted-same-key',
+      key_hash: null,
       key_prefix: 'sk-test',
       region: null,
       is_active: true,

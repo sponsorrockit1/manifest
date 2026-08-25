@@ -6,6 +6,7 @@ import { AdminController } from './controllers/admin.controller';
 import { AdminAgentController } from './controllers/admin-agent.controller';
 import { AdminProviderController } from './controllers/admin-provider.controller';
 import { AdminObservabilityController } from './controllers/admin-observability.controller';
+import { AdminRoutingController } from './controllers/admin-routing.controller';
 import { AdminKeyService } from './services/admin-key.service';
 import { AdminAiGuard } from './guards/admin-ai.guard';
 import { AnalyticsModule } from '../analytics/analytics.module';
@@ -21,6 +22,9 @@ import { OtlpModule } from '../otlp/otlp.module';
  * Only the admin-specific pieces are provided here:
  *  - AdminKeyService mints `mnfst_admin_ai_*` keys (api_keys rows, scope=ai_admin).
  *  - AdminAiGuard restricts the whole surface to that scope.
+ *
+ * v1.1: AdminRoutingController adds per-agent routing/fallback write (M5);
+ * ApiKey entity gains key_last4 + paused_at (key-management support).
  */
 @Module({
   imports: [
@@ -35,6 +39,7 @@ import { OtlpModule } from '../otlp/otlp.module';
     AdminAgentController,
     AdminProviderController,
     AdminObservabilityController,
+    AdminRoutingController,
   ],
   providers: [AdminKeyService, AdminAiGuard],
   exports: [AdminKeyService],

@@ -1,4 +1,4 @@
-import { Entity, Column, PrimaryColumn, Index } from 'typeorm';
+import { Column, Entity, PrimaryColumn, Index } from 'typeorm';
 import { timestampType, timestampDefault } from '../common/utils/postgres-sql';
 
 @Entity('api_keys')
@@ -16,8 +16,16 @@ export class ApiKey {
   @Column('varchar', { length: 12 })
   key_prefix!: string;
 
-  @Index()
+  /**
+   * Last 4 chars of the raw key (v1.1). Captured once at mint/rotate so the
+   * UI can display `prefix…last4` without storing the secret. NULL for keys
+   * minted before this column existed (legacy rows render as "—" in the UI).
+   */
+  @Column('varchar', { length: 4, nullable: true })
+  key_last4!: string | null;
+
   @Column('varchar')
+  @Index()
   tenant_id!: string;
 
   /** Audit-only: which user created the key. Never used for scoping. */
@@ -35,6 +43,15 @@ export class ApiKey {
    */
   @Column('varchar', { default: 'owner' })
   scope!: string;
+
+  /**
+   * v1.1 soft-disable: when set, the key is rejected by AdminAiGuard with
+   * 403 `key_paused` on all /api/v1/admin routes except the exempted resume
+   * route (@AllowPausedKey). Operational switch only — NOT a security
+   * boundary (an ai_admin holder can mint spares; see plan §D.4).
+   */
+  @Column(timestampType(), { nullable: true, default: null })
+  paused_at!: string | null;
 
   @Column(timestampType(), { default: timestampDefault() })
   created_at!: string;

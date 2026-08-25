@@ -64,6 +64,9 @@ export class ApiKeyGuard implements CanActivate {
       // AdminAiGuard on /api/v1/admin) can authorize without re-querying.
       const scope = (found as { scope?: string }).scope ?? 'owner';
       (request as Request & { authScope?: string }).authScope = scope;
+      // v1.1: stash the key row id so AdminAiGuard can enforce the paused
+      // switch (and services can implement self-management guards).
+      (request as Request & { apiKeyId?: string }).apiKeyId = found.id;
       if (found.created_by_user_id) {
         (request as Request & { user: { id: string } }).user = {
           id: String(found.created_by_user_id),
