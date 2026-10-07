@@ -1,0 +1,122 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Manifest (mnfst) — self-hosted, pinned, external database
+#
+# This compose is the authoritative definition for the running `mnfst` container.
+# It was tightened on 2026-08-20 to match the ACTUAL live deployment, which:
+#   - uses an EXTERNAL Postgres (no bundled postgres service),
+#   - binds the app to the LAN interface 100.84.145.125 on host port 62400,
+#   - listens internally on PORT=2099 (container port), and
+#   - runs with HSTS disabled and telemetry disabled.
+#
+# Why the image is pinned to a digest, not `:latest`:
+#   The previous deploy ran the mutable `:latest` (rolling "main") tag, which
+#   silently drifted ~6 minor versions ahead of the running container with no
+#   record of what was actually deployed. Pinning to an immutable tag+digest
+#   makes upgrades explicit and reversible. Bump BOTH the tag and the digest
+#   (from `docker pull manifestdotbuild/manifest:<tag>` → `docker inspect`
+#   → copy the amd64 digest) when you choose to upgrade.
+#
+# Before first boot (or when re-keying):
+#   cp .env.example .env
+#   then set BETTER_AUTH_SECRET (openssl rand -hex 32) and the DATABASE_URL /
+#   POSTGRES_PASSWORD pair so they AGREE (special chars percent-encoded in URL).
+#
+# Config lives in `.env` next to this file. Nothing secret is hard-coded here.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: mnfst
+
+# Pinned release: v6.18.0 (latest as of 2026-08-20). amd64 digest below — keep in
+# sync with the tag on every upgrade. Resolve the digest with:
+#   docker pull manifestdotbuild/manifest:6.18.0
+#   docker inspect --format '{{.RepoDigests}}' manifestdotbuild/manifest:6.18.0
+# (pick the sha256:...@sha256: entry for/amd64)
+services:
+  manifest:
+    image: manifestdotbuild/manifest:6.18.0@sha256:3fa12c9c8ab2615a276c5eb59b209c92743c305313f668bae29b23d5e948e3ca
+    container_name: mnfst
+    restart: unless-stopped
+    ports:
+      # HOST port (LAN) : CONTAINER port (fixed at 2099 inside the image).
+      # The live deploy binds the LAN interface 100.84.145.125 so it is
+      # reachable across the network; change to 127.0.0.1 to lock to localhost.
+      - "${APP_HOST:-100.84.145.125}:${APP_PORT:-62400}:${PORT:-2099}"
+    environment:
+      # Internal listener inside the container — DO NOT change (image default 2099).
+      # This is separate from APP_PORT (the host-exposed port above).
+      - PORT=${PORT:-2099}
+      # Bind to all interfaces inside the container so the published port works.
+      - BIND_ADDRESS=0.0.0.0
+      # External database. Must point at your standalone Postgres (the live
+      # deploy uses MnfstService@100.84.145.125:62727/Mnfst). Set in .env.
+      - DATABASE_URL=${DATABASE_URL:?DATABASE_URL must be set in .env}
+      # Session signing secret (generate: openssl rand -hex 32). Required.
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET must be set in .env}
+      # Optional separate at-rest key for stored provider/OAuth credentials.
+      # Falls back to BETTER_AUTH_SECRET when unset.
+      - MANIFEST_ENCRYPTION_KEY=${MANIFEST_ENCRYPTION_KEY:-}
+      # Public base URL users hit. Used for OAuth callbacks + auth links.
+      # Defaults to the same host:port pair above. Override for a domain.
+      - BETTER_AUTH_URL=${BETTER_AUTH_URL:-http://${APP_HOST:-100.84.145.125}:${APP_PORT:-62400}}
+      # Live deploy runs behind a TLS terminator, so the app must not emit HSTS.
+      - MANIFEST_DISABLE_HSTS=${MANIFEST_DISABLE_HSTS:-1}
+      # Disable anonymous usage telemetry (set 0 in .env to re-enable).
+      - MANIFEST_TELEMETRY_DISABLED=${MANIFEST_TELEMETRY_DISABLED:-1}
+      # Force self-hosted semantics regardless of container runtime detection.
+      - MANIFEST_MODE=${MANIFEST_MODE:-selfhosted}
+      # LLM host (Ollama/LM Studio/OpenAI-compatible) reachable from the container.
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      - SEED_DATA=false
+      - NODE_ENV=production
+      # Auto-fix (self-hosted, v6.18.0+): OFF by default, per-agent opt-in in
+      # the dashboard after a one-time consent. Set to false to make ZERO calls
+      # to the hosted healer service. Keys/tokens are never sent to it.
+      - AUTOFIX_GLOBAL_ENABLED=${AUTOFIX_GLOBAL_ENABLED:-false}
+      # Optional email / OAuth blocks — passed through from .env if present.
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-}
+      - EMAIL_API_KEY=${EMAIL_API_KEY:-}
+      - EMAIL_DOMAIN=${EMAIL_DOMAIN:-}
+      - EMAIL_FROM=${EMAIL_FROM:-}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID:-}
+      - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET:-}
+    extra_hosts:
+      # Lets the container reach an LLM server on the Docker host (e.g. Ollama).
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "const p=process.env.PORT||'2099';fetch(`http://127.0.0.1:$${p}/api/v1/health`).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 90s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 1g
+    pids_limit: 512
+    networks:
+      - mnfst_net
+
+networks:
+  mnfst_net:
+    driver: bridge
+
+# NOTE: No `postgres` service and no `pgdata` volume. This instance uses an
+# external Postgres (DATABASE_URL above). Manage that database separately; the
+# app runs migrations automatically on boot against the DB it points at.
